@@ -1,6 +1,6 @@
 log_level = 2
 read_only = true
-toolsets = ["core", "config", "openshift"]   # openshift adds plan_mustgather (prompt only, no new write tools)
+toolsets = ["core", "config", "kubevirt", "openshift"]   # requires the Red Hat Tech Preview image (registry.redhat.io/openshift-mcp-tech-preview/openshift-mcp-server-rhel9) — the community npm build has no "openshift" toolset at all. kubevirt adds vm_guest_info (+ vm-troubleshoot/windows-golden-image prompts, OpenShift Virtualization-branded on this image); openshift adds the plan_mustgather prompt only. Write tools stay hidden under read_only=true.
 
 # Always deny Secrets even though read_only is set —
 # read-only still permits *reading* secret values otherwise.
@@ -8,3 +8,55 @@ toolsets = ["core", "config", "openshift"]   # openshift adds plan_mustgather (p
 group = ""
 version = "v1"
 kind = "Secret"
+
+# Custom prompt: repo-specific wrapper around the kubevirt toolset's VM
+# diagnostics. The community npm build's `vm_troubleshoot` tool (automated
+# root-cause detection with heuristic CRITICAL/WARNING findings) is NOT
+# present on the Red Hat Tech Preview image this repo actually runs
+# (confirmed via a live tools/list probe, 2026-08-06 — known version-skew
+# gap, see CLAUDE.md/SETUP.md §4) — only `vm_guest_info` and the
+# `vm-troubleshoot` *prompt* are available here. So step 2 below is written
+# to prefer the tool if it's ever present (e.g. after an image update
+# closes the gap) but fall back to manual collection via core toolset
+# tools otherwise, rather than assuming a tool that may not exist. This
+# prompt exists to layer on the specific gaps of THIS cluster's RBAC/config
+# that neither the tool nor the manual fallback can know about on their
+# own, so a clean result isn't misread as "all clear" when a check was
+# actually just unavailable. Named distinctly from the built-in
+# `vm-troubleshoot` prompt (hyphen) so config-prompt override semantics
+# don't clobber it — overriding by name would replace the tool-driven
+# handler with static text and lose whatever heuristics it has.
+[[prompts]]
+name = "openshift-virtualization-troubleshooting"
+title = "OpenShift Virtualization Troubleshooting"
+description = "Diagnose a broken or misbehaving OpenShift Virtualization VirtualMachine, with this cluster's specific RBAC/tooling gaps factored into the read."
+
+[[prompts.arguments]]
+name = "vm_name"
+description = "Name of the VirtualMachine to troubleshoot"
+required = true
+
+[[prompts.arguments]]
+name = "namespace"
+description = "Namespace containing the VirtualMachine"
+required = true
+
+[[prompts.messages]]
+role = "user"
+content = """
+Troubleshoot the OpenShift Virtualization VirtualMachine "{{vm_name}}" in namespace "{{namespace}}".
+
+1. First, confirm the environment supports this at all: check that the VirtualMachine kind (kubevirt.io/v1) is actually registered on this cluster. If it isn't (API discovery fails, resource type not found), stop and report that OpenShift Virtualization is not installed/enabled here — do not treat that as a per-VM issue.
+2. If a vm_troubleshoot tool is available, call it for namespace "{{namespace}}" / name "{{vm_name}}" and use its heuristic CRITICAL/WARNING findings as the primary diagnosis — don't re-derive it by hand. If no such tool is available (it is not present on this cluster's current MCP server build — confirmed gap, not an error), gather the equivalent data yourself: the VirtualMachine and VirtualMachineInstance objects (status, conditions), the VM's volumes/DataVolumes/PVCs, the virt-launcher pod (state, logs), and recent events for all of the above.
+3. Then apply this cluster's known gaps when interpreting whatever you found in step 2, rather than taking a clean report at face value:
+   - Node conditions and resource pressure (MemoryPressure, DiskPressure) are NOT visible to this identity — it cannot read Node objects here. If the VMI is Pending or unschedulable and the tool's findings don't explain why, node-side pressure is a real possibility this tool run cannot confirm or rule out — say so explicitly rather than concluding "no cause found".
+   - The metrics API is not available on this cluster (nodes_top/pods_top fail) — this identity has no way to check actual CPU/memory usage on the node or in the guest. If resource exhaustion is suspected, say it can't be verified from here.
+   - This MCP server's events data only covers roughly the last hour. If the tool's findings rely on an empty/clean events section, note that this only rules out the last hour, not older or historical occurrences of the same problem.
+   - Live migration state (VirtualMachineInstanceMigration objects) may not be fully surfaced by the tool's own checks — if migration is relevant to the symptom, explicitly look for VirtualMachineInstanceMigration objects referencing this VMI, active or recently failed, and fold that into the summary.
+
+Then give a final summary: overall status, most likely root cause, the evidence for it (tool findings + anything you found in step 3), concrete next steps, and an explicit list of anything you could not verify due to this identity's limitations rather than silently omitting it.
+"""
+
+[[prompts.messages]]
+role = "assistant"
+content = "I'll diagnose VirtualMachine {{vm_name}} in namespace {{namespace}} — using vm_troubleshoot if it's available, otherwise gathering VM/VMI/volume/pod/event data directly — then check the findings against this cluster's known gaps (no node/metrics visibility, ~1h event window) before summarizing the root cause and next steps."

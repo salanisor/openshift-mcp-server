@@ -41,8 +41,14 @@ limits what a compromised or misbehaving model session can do.
    the wrong context.
 9. **File permissions**: kubeconfig files and any file holding a bare token
    must be `chmod 600`. This includes ad hoc/scratch token files, not just
-   the final kubeconfig — see §2.
+   the final kubeconfig — see §2. The same applies to `pull-secret.json`
+   (§3) if this repo is using the Red Hat Tech Preview image — it's a live
+   registry credential, not a throwaway file.
 10. **Stay current** — only the latest release gets security fixes (see §6).
+    If running the Red Hat Tech Preview image (§3), pin an explicit tag
+    rather than floating `:latest` — Tech Preview carries no stability
+    guarantee, and a floating tag has already caused a silent breakage in
+    this exact setup once (see §4).
 11. **Have a revocation path ready** before you need it (see §8) — know how
     to kill the token and the ServiceAccount's access without waiting on a
     natural expiry.
@@ -230,27 +236,78 @@ npm install -g @anthropic-ai/claude-code
 Upgrade later with `npm install -g @anthropic-ai/claude-code@latest` (not
 `npm update -g`, which won't necessarily move you to the latest version).
 
-Either way, the MCP server itself also runs through `npx` (see the
-`add-json` command below), so keep Node/npm current regardless of which
-install method you pick for the `claude` CLI.
+Node/npm are only needed for the `claude` CLI itself now — **the MCP server
+does not run through `npx`** (see below for why).
+
+### Pull the server image (Red Hat Tech Preview, requires a subscription)
+
+As established above, getting the `openshift` toolset requires Red Hat's
+downstream Tech Preview image, not the `npx kubernetes-mcp-server@latest`
+community package. Pulling it needs a Red Hat Customer Portal
+subscription's pull secret:
+
+1. Download your pull secret from
+   [console.redhat.com/openshift/install/pull-secret](https://console.redhat.com/openshift/install/pull-secret)
+   (or reuse an existing cluster pull secret) and save it as
+   `pull-secret.json` in this directory.
+2. **Immediately lock it down** — it's a live registry credential, same
+   category as the kubeconfig/tokens covered in §1.9:
+   ```bash
+   chmod 600 pull-secret.json
+   ```
+3. Confirm it's gitignored (it already is in this repo — verify with
+   `git check-ignore pull-secret.json` before ever running `git add`).
+4. Pull the image, pinning an explicit tag — **not** `:latest` (this setup
+   already broke once from a floating tag silently changing; see the note
+   in §4):
+   ```bash
+   podman pull --authfile=./pull-secret.json \
+     registry.redhat.io/openshift-mcp-tech-preview/openshift-mcp-server-rhel9:0.4
+   ```
+   `skopeo list-tags --authfile=./pull-secret.json docker://registry.redhat.io/openshift-mcp-tech-preview/openshift-mcp-server-rhel9`
+   shows what tags currently exist if `0.4` has moved on.
+
+The pull secret is only needed for `podman pull` — it plays no role at
+runtime and isn't referenced by the `claude mcp` registration below.
 
 ### Quick setup (recommended — hardened config from §4 baked in)
 
 This is the actual command used in this environment — points at the
-hardened `config.toml` (§4) rather than just `--read-only`, and layers on
-`--disable-destructive` / `--disable-multi-cluster` per §1:
+hardened `config.toml` (§4), mounts the dedicated kubeconfig from §2
+read-only, and layers on `--disable-destructive` / `--disable-multi-cluster`
+per §1. Three non-obvious flags are required on this image, each confirmed
+live rather than assumed — **don't drop any of them**:
+
+- `--port ""` — without it, the binary defaults to an HTTP server on
+  `0.0.0.0:8080` instead of stdio, despite its own `--help` text claiming
+  stdio is the default with no `--port` given. Confirmed by direct probing;
+  this looks like a bug/behavior change specific to this build, not
+  documented anywhere upstream.
+- `--cluster-provider kubeconfig` — forces kubeconfig-based auth rather
+  than relying on auto-detection, which was implicated in the same
+  HTTP-mode misbehavior above.
+- `--userns=keep-id --user 1000:1000` — the image's default container user
+  is a non-root UID (`65532`) that cannot read a `chmod 600` file owned by
+  your host user. This maps the container process to your actual host
+  UID/GID instead, so the kubeconfig can stay `600` rather than being
+  loosened to satisfy the container. **Replace `1000:1000` with your own
+  `$(id -u):$(id -g)`** if it differs — this repo's convention is not to
+  hardcode another user's UID into a shared doc, but the exact values must
+  match whoever is actually running it.
 
 ```bash
 claude mcp add-json kubernetes-mcp-server \
-  '{"command":"npx","args":["-y","kubernetes-mcp-server@latest","--config","'${HOME}'/claude/openshift-mcp-server/config.toml","--disable-destructive","--disable-multi-cluster"],"env":{"KUBECONFIG":"'${HOME}'/claude/openshift-mcp-server.kubeconfig"}}' \
+  '{"command":"podman","args":["run","--rm","-i","--userns=keep-id","--user","'$(id -u)':'$(id -g)'","-v","'${HOME}'/claude/openshift-mcp-server/config.toml:/config.toml:ro,Z","-v","'${HOME}'/claude/openshift-mcp-server.kubeconfig:/kubeconfig:ro,Z","-e","KUBECONFIG=/kubeconfig","registry.redhat.io/openshift-mcp-tech-preview/openshift-mcp-server-rhel9:0.4","--config","/config.toml","--disable-destructive","--disable-multi-cluster","--port","","--cluster-provider","kubeconfig"]}' \
   -s user
 ```
 
-If you haven't written `config.toml` yet, do §4 first, or fall back to
-bare `--read-only` temporarily — but replace it once §4 is done.
+If you haven't written `config.toml` yet, do §4 first.
 
-Note this points `KUBECONFIG` at the dedicated kubeconfig built in §2 —
-**not** your personal `~/.kube/config`.
+Note the `-v` mounts point at the dedicated kubeconfig built in §2 —
+**not** your personal `~/.kube/config`. Both mounts use `:ro` (read-only)
+and the `Z` SELinux relabel option (needed on Fedora/RHEL with SELinux
+enforcing; drop it only if podman complains about an unknown option on a
+non-SELinux host).
 
 **`add-json` is not idempotent — it silently no-ops if the name is already
 registered.** `claude mcp add-json` has no `--force` or update option (check
@@ -258,32 +315,32 @@ registered.** `claude mcp add-json` has no `--force` or update option (check
 under this name, re-running the command above prints
 `MCP server kubernetes-mcp-server already exists in user config` and makes
 **no change** — not to the command, not to `args`, not to `env`. This has
-bitten this setup more than once: editing `config.toml`'s *contents*
-(toolsets, `denied_resources`, `read_only`) is safe to do in place, because
-`npx` re-reads that file on every process spawn. But changing the
-*invocation itself* — the `--config` path, `--disable-destructive`,
-`--disable-multi-cluster`, or the `KUBECONFIG` env var — requires replacing
-the registration, not just re-running `add-json`:
+bitten this setup more than once. Unlike the old `npx`-based setup, editing
+`config.toml`'s *contents* (toolsets, `denied_resources`, `read_only`) is
+still safe to do in place — the container re-reads the mounted file on
+every fresh `podman run` — but changing the *invocation itself* (any flag,
+the image tag, the mounts) requires replacing the registration, not just
+re-running `add-json`:
 
 ```bash
 # 1. Remove the stale registration
 claude mcp remove kubernetes-mcp-server -s user
 
-# 2. Re-add with the current, intended invocation
+# 2. Re-add with the current, intended invocation (same command as above)
 claude mcp add-json kubernetes-mcp-server \
-  '{"command":"npx","args":["-y","kubernetes-mcp-server@latest","--config","'${HOME}'/claude/openshift-mcp-server/config.toml","--disable-destructive","--disable-multi-cluster"],"env":{"KUBECONFIG":"'${HOME}'/claude/openshift-mcp-server.kubeconfig"}}' \
+  '{"command":"podman","args":["run","--rm","-i","--userns=keep-id","--user","'$(id -u)':'$(id -g)'","-v","'${HOME}'/claude/openshift-mcp-server/config.toml:/config.toml:ro,Z","-v","'${HOME}'/claude/openshift-mcp-server.kubeconfig:/kubeconfig:ro,Z","-e","KUBECONFIG=/kubeconfig","registry.redhat.io/openshift-mcp-tech-preview/openshift-mcp-server-rhel9:0.4","--config","/config.toml","--disable-destructive","--disable-multi-cluster","--port","","--cluster-provider","kubeconfig"]}' \
   -s user
 
 # 3. Verify the new invocation actually landed (add-json prints no confirmation
 #    of what it registered, so check the raw config directly)
-grep -A 12 '"kubernetes-mcp-server"' ~/.claude.json
+grep -A 20 '"kubernetes-mcp-server"' ~/.claude.json
 ```
 
-**Whenever you change anything about *how* the server is invoked** — the
-`--config` path, any CLI flag, `KUBECONFIG`, or the command itself — treat
-`remove` + re-add as a required step, not an optional one. `claude mcp list`
-showing `✔ Connected` afterward is not proof the new invocation took: it
-only reports the existing connection's health, so always confirm against
+**Whenever you change anything about *how* the server is invoked** — any
+flag, the image tag, the mounts, or the command itself — treat `remove` +
+re-add as a required step, not an optional one. `claude mcp list` showing
+`✔ Connected` afterward is not proof the new invocation took: it only
+reports the existing connection's health, so always confirm against
 `~/.claude.json` (step 3 above) after any invocation change.
 
 ### Manual config alternative
@@ -293,14 +350,12 @@ File: `~/.config/claude-code/config.toml`
 ```toml
 [[mcp_servers]]
 name = "kubernetes-mcp-server"
-command = "npx"
-args = ["-y", "kubernetes-mcp-server@latest", "--config", "/home/YOUR_USERNAME/claude/openshift-mcp-server/config.toml", "--disable-destructive", "--disable-multi-cluster"]
-
-[mcp_servers.env]
-KUBECONFIG = "/home/YOUR_USERNAME/claude/openshift-mcp-server.kubeconfig"
+command = "podman"
+args = ["run", "--rm", "-i", "--userns=keep-id", "--user", "1000:1000", "-v", "/home/YOUR_USERNAME/claude/openshift-mcp-server/config.toml:/config.toml:ro,Z", "-v", "/home/YOUR_USERNAME/claude/openshift-mcp-server.kubeconfig:/kubeconfig:ro,Z", "-e", "KUBECONFIG=/kubeconfig", "registry.redhat.io/openshift-mcp-tech-preview/openshift-mcp-server-rhel9:0.4", "--config", "/config.toml", "--disable-destructive", "--disable-multi-cluster", "--port", "", "--cluster-provider", "kubeconfig"]
 ```
 
-Replace `/home/YOUR_USERNAME/` with your actual home directory.
+Replace `/home/YOUR_USERNAME/` with your actual home directory, and
+`1000:1000` with your actual `$(id -u):$(id -g)`.
 
 ### Verify
 
@@ -322,7 +377,7 @@ connection) after changing it.
 ```toml
 log_level = 2
 read_only = true
-toolsets = ["core", "config", "openshift"]   # only what you actually use
+toolsets = ["core", "config", "kubevirt", "openshift"]   # only what you actually use
 
 # Always deny Secrets even though read_only is set —
 # read-only still permits *reading* secret values otherwise.
@@ -337,11 +392,53 @@ kind = "Secret"
 # kind = "ClusterRoleBinding"
 ```
 
-`openshift` here adds only the `plan_mustgather` *prompt* (manifest planning,
-no new tools) — see the toolset table below. It's included in this repo's
-`config.toml` because cluster investigations are the point of this setup;
-`read_only`/`--disable-destructive` still block this identity from acting on
-what that prompt generates.
+`kubevirt` adds the `vm_guest_info` tool plus the `vm-troubleshoot`/
+`windows-golden-image` prompts (OpenShift Virtualization-branded on the
+image this repo actually runs — see below). `openshift` adds only the
+`plan_mustgather` prompt — no new tools. `read_only` already blocks every
+write tool either toolset defines (`vm_create`/`vm_lifecycle`/`vm_clone`)
+from being exposed at all, confirmed live 2026-08-06 by probing the
+server's `tools/list` response directly rather than assuming.
+
+> **Important (confirmed 2026-08-06): this repo does NOT run via `npx
+> kubernetes-mcp-server@latest`.** That was the setup for a long time and
+> is why `openshift` briefly looked broken/removed — it never was. Here's
+> what's actually going on:
+>
+> - `openshift/openshift-mcp-server` (this project's docs) is a **downstream
+>   Red Hat fork** of the community project `containers/kubernetes-mcp-server`.
+>   The fork adds extra toolsets in its own source
+>   (`openshift`, `openshift/mustgather`, `oadp`, `netedge`,
+>   `cluster-diagnostics`, `cni-diagnostics`, `ovn-kubernetes`) that the
+>   community upstream never had.
+> - `npx kubernetes-mcp-server@latest` installs the **npm package published
+>   from the community upstream**, not this fork. It only ever recognizes
+>   `config, core, helm, kcp, kiali, kubevirt, netobserv, tekton` — `openshift`
+>   was never available there, at any point, confirmed by checking the
+>   package's own `pkg/toolsets/` source tree.
+> - The fork itself has no npm package. It's shipped as a container image —
+>   **Red Hat's "OpenShift MCP Server" Tech Preview**
+>   (`registry.redhat.io/openshift-mcp-tech-preview/openshift-mcp-server-rhel9`,
+>   `LABEL vendor="Red Hat, Inc."`, built via Red Hat's Konflux pipeline).
+>   That image is the only way to get the `openshift` toolset and
+>   `plan_mustgather`. §3 below now uses it.
+> - **Tech Preview means unsupported and subject to change without notice**
+>   — Red Hat's own designation, not this doc's editorializing. Pin the
+>   image tag explicitly (this repo uses `0.4`); do not float `:latest`,
+>   given `npx @latest` already silently broke this setup once.
+> - **Known feature gap on this image vs. the community npm build**
+>   (confirmed live via `tools/list`, 2026-08-06): this Tech Preview build
+>   (tag `0.4`) is missing `configuration_view` and the heuristic
+>   `vm_troubleshoot` tool that the community `kubevirt` toolset has — likely
+>   version skew from whenever the fork last synced upstream. If those tools
+>   matter more than `openshift`/`plan_mustgather`, `npx
+>   kubernetes-mcp-server@latest` with `toolsets = ["core", "config",
+>   "kubevirt"]` is the better trade-off; this repo chose `openshift` +
+>   `plan_mustgather` instead.
+> - **Pulling the image requires a Red Hat Customer Portal
+>   subscription** — confirmed by an unauthenticated pull failing with
+>   `unauthorized: Please login to the Red Hat Registry using your Customer
+>   Portal credentials`. See §3 for the pull-secret handling.
 
 Key flags to know (combine as needed):
 
@@ -353,6 +450,8 @@ Key flags to know (combine as needed):
 | `--toolsets` | Comma-separated allowlist of enabled tool groups |
 | `--config` | Path to the TOML file above |
 | `--kubeconfig` | Path to the dedicated kubeconfig from §2 |
+| `--cluster-provider kubeconfig` | Forces kubeconfig-based auth explicitly. Needed on this image — see the podman quirks note in §3. |
+| `--port ""` | Forces stdio transport explicitly. **Required** on this image — without it, the binary defaults to an HTTP server on `0.0.0.0:8080` despite its own `--help` text claiming stdio is the default with no `--port` given. See §3. |
 
 Toolsets and what they add (attack surface grows with each one enabled):
 
@@ -361,8 +460,8 @@ Toolsets and what they add (attack surface grows with each one enabled):
 | `core` | Basic resource read/list/describe — the baseline, always needed |
 | `config` | Reading cluster/kubeconfig context info |
 | `helm` | Helm release install/list/uninstall — write-capable even under some read-only interpretations; only enable if Helm workflows are actually in use |
-| `kubevirt` | VirtualMachine start/stop/access — treat as equivalent to node-level access on any cluster running KubeVirt |
-| `openshift` | Adds the `plan_mustgather` prompt only (generates must-gather manifests requesting a `cluster-admin` ClusterRoleBinding) — no new tools. `read_only`/`--disable-destructive` block this identity from actually applying what it generates. |
+| `kubevirt` | Adds `vm_guest_info` (read-only VM diagnostics) plus `vm-troubleshoot`/`windows-golden-image` prompts. Also defines write tools (`vm_create`, `vm_lifecycle`, `vm_clone`) — those carry `readOnlyHint=false` and do **not** get exposed while `read_only = true` is set (confirmed live via `tools/list`, 2026-08-06). If this repo's config is ever run without `--read-only`, treat this toolset as equivalent to node-level access, since VM start/stop/create/clone become available. |
+| `openshift` | Adds the `plan_mustgather` prompt only (generates must-gather manifests requesting a `cluster-admin` ClusterRoleBinding) — no new tools. `read_only`/`--disable-destructive` block this identity from actually applying what it generates. Only available on the Red Hat Tech Preview image — see the note above. |
 
 Sensitive data (tokens, keys, passwords, cloud credentials) is automatically
 redacted in MCP logging output — this is a defense-in-depth measure, not a

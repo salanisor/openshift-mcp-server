@@ -73,15 +73,33 @@ available) — don't just re-run `oc` commands.
 
 4. **Confirm no destructive tool is exposed.** Check the current MCP tool
    list for this server (e.g. via `ToolSearch` or the session's tool
-   listing) and confirm there's no delete/create/patch-capable tool (only
-   `pods_*`, `resources_get`/`resources_list`, `events_list`,
-   `namespaces_list`/`projects_list`, `nodes_*`, `configuration_view` should
-   appear). This should hold given `toolsets = ["core", "config",
-   "openshift"]` and `--disable-destructive` — `openshift` only adds the
+   listing) and confirm there's no delete/create/patch-capable tool. Given
+   `toolsets = ["core", "config", "kubevirt", "openshift"]` and
+   `--disable-destructive`/`read_only = true`, the expected tool set
+   (confirmed live 2026-08-06 on the Tech Preview image, tag `0.4`) is:
+   `events_list`, `namespaces_list`, `nodes_log`, `nodes_stats_summary`,
+   `nodes_top`, `pods_get`, `pods_list`, `pods_list_in_namespace`,
+   `pods_log`, `pods_top`, `projects_list`, `resources_get`,
+   `resources_list`, `vm_guest_info`. **`configuration_view` is expected to
+   be absent** on this image despite `config` being enabled — that's a
+   known gap versus the community npm build (CLAUDE.md), not a
+   misconfiguration; don't flag it as a finding. Neither `kubevirt` nor
+   `openshift` should add any write-capable tool (`vm_create`,
+   `vm_lifecycle`, `vm_clone` must NOT appear) — `openshift` only adds the
    `plan_mustgather` *prompt* (manifest generation, not a callable tool), so
    it shouldn't show up in this tool-list check at all. Toolsets can still be
    widened by mistake — this step catches that directly instead of trusting
    the flag.
+
+5. **Confirm the custom and restored prompts are actually registered.**
+   Check `prompts/list` (or the client's prompt listing) for all five
+   expected entries: `cluster-health-check`,
+   `openshift-virtualization-troubleshooting` (this repo's custom prompt),
+   `plan_mustgather`, `vm-troubleshoot`, `windows-golden-image`. Missing
+   `plan_mustgather` or `vm-troubleshoot`/`windows-golden-image` most likely
+   means the registration silently fell back to a different image or the
+   community `npx` path — re-check `claude mcp list`'s exact invocation
+   against SETUP.md §3 (podman command, image tag, `--userns=keep-id`).
 
 ## 3. Report
 

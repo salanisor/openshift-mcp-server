@@ -11,3 +11,6 @@ kubeconfig.*
 
 # Stray/local files that don't belong in this repo
 *.html
+
+# RH pull secrets
+pull-secret.json
