@@ -34,6 +34,11 @@ to be configured, and is written as a hardened, least-privilege setup guide.
 **Treat SETUP.md as the spec — when editing the YAML/shell files in this
 directory, check them against it, and when SETUP.md changes, update the
 generated artifacts (or flag the drift) rather than letting them diverge.**
+[docs/MCP-USAGE.md](docs/MCP-USAGE.md) is the reference for *using* the
+server day to day — every available prompt (built-in and custom, with args
+and invocation syntax) plus a worked investigation example. Update it
+alongside `config.toml` if a prompt is added, removed, or its arguments
+change, same drift-avoidance rule as SETUP.md.
 
 ## Files in this directory
 
