@@ -1,0 +1,10 @@
+log_level = 2
+read_only = true
+toolsets = ["core", "config"]   # only what you actually use
+
+# Always deny Secrets even though read_only is set —
+# read-only still permits *reading* secret values otherwise.
+[[denied_resources]]
+group = ""
+version = "v1"
+kind = "Secret"
