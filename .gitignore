@@ -1,0 +1,13 @@
+# Live credentials — must never live in or be committed from this directory.
+# The real kubeconfig/token live outside this repo (~/claude/*.kubeconfig),
+# but ignore these patterns defensively in case one ever lands here.
+*.kubeconfig
+kubeconfig
+kubeconfig.*
+*token*
+*.pem
+*.key
+*.crt
+
+# Stray/local files that don't belong in this repo
+*.html
