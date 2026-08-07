@@ -19,12 +19,11 @@ part. `fieldSelector` narrows it server-side.
 events_list(fieldSelector: "type=Warning")
 ```
 
-Live result (2026-08-06 19:0x CDT): 60+ Warning events returned across
-namespaces (`argocd`, `openshift-pipelines`, `openshift-storage`, `rhsso`,
-etc.) — probe failures, `FailedMount`, `BackOff`, operator resolution
-conflicts. None had reason `OOMKilling` or `OOMKilled`. This confirms the
-call reaches the real cluster and returns real, varied data — not a canned
-or empty stub.
+Live result (2026-08-06 19:0x CDT): 60+ Warning events returned, spread
+across a dozen-plus namespaces — probe failures, `FailedMount`, `BackOff`,
+operator resolution conflicts. None had reason `OOMKilling` or `OOMKilled`.
+This confirms the call reaches the real cluster and returns real, varied
+data — not a canned or empty stub.
 
 ### Query 2 — OOM-specific
 

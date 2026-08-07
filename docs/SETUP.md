@@ -322,7 +322,7 @@ connection) after changing it.
 ```toml
 log_level = 2
 read_only = true
-toolsets = ["core", "config"]   # only what you actually use
+toolsets = ["core", "config", "openshift"]   # only what you actually use
 
 # Always deny Secrets even though read_only is set —
 # read-only still permits *reading* secret values otherwise.
@@ -336,6 +336,12 @@ kind = "Secret"
 # group = "rbac.authorization.k8s.io"
 # kind = "ClusterRoleBinding"
 ```
+
+`openshift` here adds only the `plan_mustgather` *prompt* (manifest planning,
+no new tools) — see the toolset table below. It's included in this repo's
+`config.toml` because cluster investigations are the point of this setup;
+`read_only`/`--disable-destructive` still block this identity from acting on
+what that prompt generates.
 
 Key flags to know (combine as needed):
 
@@ -356,6 +362,7 @@ Toolsets and what they add (attack surface grows with each one enabled):
 | `config` | Reading cluster/kubeconfig context info |
 | `helm` | Helm release install/list/uninstall — write-capable even under some read-only interpretations; only enable if Helm workflows are actually in use |
 | `kubevirt` | VirtualMachine start/stop/access — treat as equivalent to node-level access on any cluster running KubeVirt |
+| `openshift` | Adds the `plan_mustgather` prompt only (generates must-gather manifests requesting a `cluster-admin` ClusterRoleBinding) — no new tools. `read_only`/`--disable-destructive` block this identity from actually applying what it generates. |
 
 Sensitive data (tokens, keys, passwords, cloud credentials) is automatically
 redacted in MCP logging output — this is a defense-in-depth measure, not a

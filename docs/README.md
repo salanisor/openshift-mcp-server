@@ -21,9 +21,11 @@ documented upstream at
 - [Tools and Functionalities](https://github.com/openshift/openshift-mcp-server#tools-and-functionalities) — the full list of every MCP tool (command) `kubernetes-mcp-server@latest` exposes, grouped by toolset (`core`, `config`, `openshift`, `helm`, `kubevirt`, `tekton`, etc.), plus which toolsets are enabled by default.
 - [Configuration reference](https://github.com/openshift/openshift-mcp-server/blob/main/docs/configuration.md) — every `config.toml` option and CLI flag (`--read-only`, `--disable-destructive`, `--toolsets`, `--config`, ...).
 - [Getting started with Claude Code](https://github.com/openshift/openshift-mcp-server/blob/main/docs/getting-started-claude-code.md) — upstream's own Claude Code integration guide.
-- [OpenShift-specific tools](https://github.com/openshift/openshift-mcp-server/blob/main/docs/OPENSHIFT.md) — the `openshift` toolset used by this setup.
+- [OpenShift toolset](https://github.com/openshift/openshift-mcp-server/blob/main/docs/OPENSHIFT.md) — adds one MCP *prompt*, `plan_mustgather`, which generates manifests for a must-gather run (temporary namespace + ServiceAccount + a **cluster-admin** ClusterRoleBinding + privileged pod). It does not add any new read tools. **Enabled here** (see below) — `read_only = true` and `--disable-destructive` block this repo's `claude-code` ServiceAccount from ever actually applying what the prompt generates, so the prompt can plan a must-gather but this identity can't execute one.
 
-This repo's `config.toml` currently enables only `core` and `config` (see
-[SETUP.md §4](SETUP.md#4-hardened-toml-configuration)) — check the upstream
-tools list above against that toolset scope if you're wondering what a given
-MCP tool call can and can't do here.
+This repo's `config.toml` enables `core`, `config`, and `openshift` (see
+[SETUP.md §4](SETUP.md#4-hardened-toml-configuration)). Note that OpenShift-specific
+resource types (Routes, Projects, ImageStreams, DeploymentConfigs, ...) don't
+need the `openshift` toolset at all — `resources_list`/`resources_get` in
+`core` already accept any `apiVersion`/`kind`, including OpenShift's, e.g.
+`route.openshift.io/v1 Route` or `project.openshift.io/v1 Project`.

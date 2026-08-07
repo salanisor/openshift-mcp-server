@@ -1,6 +1,6 @@
 log_level = 2
 read_only = true
-toolsets = ["core", "config"]   # only what you actually use
+toolsets = ["core", "config", "openshift"]   # openshift adds plan_mustgather (prompt only, no new write tools)
 
 # Always deny Secrets even though read_only is set —
 # read-only still permits *reading* secret values otherwise.

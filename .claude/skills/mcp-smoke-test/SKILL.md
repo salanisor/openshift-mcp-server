@@ -76,9 +76,12 @@ available) — don't just re-run `oc` commands.
    listing) and confirm there's no delete/create/patch-capable tool (only
    `pods_*`, `resources_get`/`resources_list`, `events_list`,
    `namespaces_list`/`projects_list`, `nodes_*`, `configuration_view` should
-   appear). This should hold given `toolsets = ["core", "config"]` and
-   `--disable-destructive`, but toolsets can be widened by mistake — this
-   step catches that directly instead of trusting the flag.
+   appear). This should hold given `toolsets = ["core", "config",
+   "openshift"]` and `--disable-destructive` — `openshift` only adds the
+   `plan_mustgather` *prompt* (manifest generation, not a callable tool), so
+   it shouldn't show up in this tool-list check at all. Toolsets can still be
+   widened by mistake — this step catches that directly instead of trusting
+   the flag.
 
 ## 3. Report
 
