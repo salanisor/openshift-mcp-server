@@ -7,9 +7,11 @@ Start with [`SETUP.md`](SETUP.md) — everything else builds on it.
   Source of truth for how the ServiceAccount, RBAC binding, token, kubeconfig,
   and `config.toml` in this repo are *supposed* to be configured. Read this
   first if you're standing up a fresh instance or auditing an existing one.
-- **[MCP-OOM-CHECK.md](MCP-OOM-CHECK.md)** — a worked example of asking the
-  MCP server for cluster-wide OOM evidence using only MCP tool calls (no
-  `oc`/`kubectl`/shell), with real captured output proving the path works.
+- **[MCP-USAGE.md](MCP-USAGE.md)** — reference for every MCP prompt this
+  setup exposes (built-in and custom, with args and invocation syntax),
+  plus a worked example of asking the MCP server for OOM evidence
+  (cluster-wide and namespace-scoped) using only MCP tool calls — no
+  `oc`/`kubectl`/shell — with real captured output proving the path works.
 
 ## Official upstream documentation
 
