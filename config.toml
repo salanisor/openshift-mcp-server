@@ -60,3 +60,69 @@ Then give a final summary: overall status, most likely root cause, the evidence 
 [[prompts.messages]]
 role = "assistant"
 content = "I'll diagnose VirtualMachine {{vm_name}} in namespace {{namespace}} — using vm_troubleshoot if it's available, otherwise gathering VM/VMI/volume/pod/event data directly — then check the findings against this cluster's known gaps (no node/metrics visibility, ~1h event window) before summarizing the root cause and next steps."
+
+# Custom prompt: fills in the "Cluster details" block (MASTERS/ETCD
+# NODES/INFRA NODES/APP NODES/PROJECTS/SERVICES/PODS) used when opening a
+# proactive support case ahead of a planned maintenance action (e.g. an
+# OCP upgrade) — modeled on this repo's local "Example of a Proactive
+# Case" template. Deliberately scoped to ONLY that analysis block, not the
+# whole case (title, maintenance window, contacts) — this identity has no
+# way to know those and templating empty fields for them would invite
+# fabrication instead of leaving them for the human filing the case.
+#
+# Two RBAC gaps shape this prompt, both confirmed live against this
+# cluster 2026-08-06, not assumed:
+#   - Node reads are Forbidden (see CLAUDE.md "Known limitations"), so
+#     MASTERS/INFRA/APP NODE counts can't come from listing Node objects.
+#   - MachineConfigPool reads are ALSO Forbidden at cluster scope
+#     ("machineconfigpools.machineconfiguration.openshift.io is forbidden
+#     ... at the cluster scope") — ruling out the obvious node-count
+#     workaround (status.machineCount per pool) that avoids touching Node
+#     objects directly. Both gaps come from this repo's `view`-based
+#     ClusterRoleBinding (SETUP.md §2 Option B), not this cluster
+#     specifically, so expect them on any cluster set up per SETUP.md.
+#   ETCD NODES sidesteps both: counting `app=etcd` pods in the
+#   `openshift-etcd` namespace confirmed live and works under `view`.
+#
+# Also confirmed live: even on a small test cluster, unfiltered
+# cluster-wide resources_list for Service/Pod exceeded the MCP tool
+# result's token limit and got redirected to a saved file — this isn't a
+# large-cluster-only concern, so step 4/5 below build the jq-on-file
+# fallback in from the start rather than treating it as an edge case.
+[[prompts]]
+name = "proactive_ticket"
+title = "Proactive Ticket Cluster Analysis"
+description = "Collect the 'Cluster details' analysis block (node/etcd/project/service/pod counts) for a proactive support case, honestly flagging counts this identity's RBAC can't obtain rather than guessing."
+
+[[prompts.messages]]
+role = "user"
+content = """
+Gather the "Cluster details" analysis block for a proactive support case (see this repo's "Example of a Proactive Case" template) — node role counts, project count, service count, pod count. Do not invent or fill in maintenance-window, contact, or case-description fields — those come from the person filing the case, not the cluster, and are out of scope for this prompt.
+
+1. ETCD NODES: count Pods in the `openshift-etcd` namespace with label `app=etcd` (`resources_list` apiVersion "v1", kind "Pod", namespace "openshift-etcd", labelSelector "app=etcd"). This counts etcd members directly without needing Node access.
+
+2. MASTERS / INFRA NODES / APP NODES: this identity cannot read `Node` objects (confirmed Forbidden — see CLAUDE.md "Known limitations") and `MachineConfigPool` reads are Forbidden too (confirmed live: "machineconfigpools.machineconfiguration.openshift.io is forbidden ... at the cluster scope"), which rules out the usual node-count-via-MCP workaround. Do not attempt to infer these counts from workload placement, pod anti-affinity, or other indirect signals — report all three as "not obtainable with this identity's RBAC — needs `oc get nodes` (or equivalent) from a higher-privileged identity" rather than guessing or silently omitting the line.
+
+3. PROJECTS: call `projects_list` (fall back to `namespaces_list` if that's unavailable) and count the returned entries.
+
+4. SERVICES: call `resources_list` with apiVersion "v1", kind "Service", no namespace (cluster-wide). If the result returns inline, count the items directly. If it instead errors with something like "exceeds maximum allowed tokens" and gets saved to a file, do NOT read that file with the Read tool — run `jq '.items | length' <path>` on the saved file to get the count without pulling the full listing into context.
+
+5. PODS: same approach as step 4, but kind "Pod".
+
+Then output the result formatted like the "Cluster details" section of the case template, e.g.:
+
+Cluster details:
+  MASTERS: <count or "not obtainable — see notes">
+  ETCD NODES: <count>
+  INFRA NODES: <count or "not obtainable — see notes">
+  APP NODES: <count or "not obtainable — see notes">
+  PROJECTS: <count>
+  SERVICES: <count>
+  PODS: <count>
+
+Follow it with a short "Notes" section listing anything not obtainable and why, so a missing value isn't misread as zero or an oversight when this gets pasted into an actual case.
+"""
+
+[[prompts.messages]]
+role = "assistant"
+content = "I'll collect the cluster-details analysis block for a proactive case: etcd node count via openshift-etcd pods, project/service/pod counts via projects_list and resources_list (falling back to jq on saved-file output if a listing is too large for context), and I'll explicitly flag MASTERS/INFRA/APP NODE counts as not obtainable through this identity's RBAC rather than guessing — I won't fill in maintenance-window or contact fields, those aren't derivable from the cluster."

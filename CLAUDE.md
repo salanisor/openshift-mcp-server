@@ -59,19 +59,28 @@ change, same drift-avoidance rule as SETUP.md.
   place; the container re-reads it on every fresh `podman run`, so no image
   rebuild is needed for content changes — only for changing the invocation
   itself (see SETUP.md §3's `add-json` non-idempotency warning). Also
-  defines one custom `[[prompts]]` entry,
-  `openshift-virtualization-troubleshooting` — a guided VM triage workflow
-  (`vm_name`, `namespace` args, both required) that wraps the built-in
-  `vm-troubleshoot`/`vm_guest_info` tooling with this cluster's specific
-  RBAC/tooling gaps (no node reads, no metrics API, ~1h event window) so
-  they aren't misread as "all clear". It needs no RBAC change to work: the
-  `view` ClusterRole aggregates in VM/VMI/DataVolume read access
-  automatically once CNV actually deploys those CRDs' own ClusterRoles
-  (confirmed 2026-08-06). As of that date this cluster's `openshift-cnv`
-  namespace exists but has no `HyperConverged` CR, so the `kubevirt.io/v1
-  VirtualMachine` kind isn't registered yet — the prompt's step 1 checks
-  for that and bails out cleanly rather than misreporting a missing CRD as
-  a broken VM.
+  defines two custom `[[prompts]]` entries:
+  - `openshift-virtualization-troubleshooting` — a guided VM triage workflow
+    (`vm_name`, `namespace` args, both required) that wraps the built-in
+    `vm-troubleshoot`/`vm_guest_info` tooling with this cluster's specific
+    RBAC/tooling gaps (no node reads, no metrics API, ~1h event window) so
+    they aren't misread as "all clear". It needs no RBAC change to work: the
+    `view` ClusterRole aggregates in VM/VMI/DataVolume read access
+    automatically once CNV actually deploys those CRDs' own ClusterRoles
+    (confirmed 2026-08-06). As of that date this cluster's `openshift-cnv`
+    namespace exists but has no `HyperConverged` CR, so the `kubevirt.io/v1
+    VirtualMachine` kind isn't registered yet — the prompt's step 1 checks
+    for that and bails out cleanly rather than misreporting a missing CRD as
+    a broken VM.
+  - `proactive_ticket` — collects the "Cluster details" analysis block
+    (node/etcd/project/service/pod counts) needed to open a proactive
+    support case, no arguments. MASTERS/INFRA/APP NODE counts are always
+    reported as unobtainable, not guessed: this identity can't read `Node`
+    objects (existing known limitation, below) *or* `MachineConfigPool`
+    objects — the usual node-count-without-Node-access workaround — both
+    confirmed `Forbidden` live, 2026-08-06. Deliberately doesn't template
+    maintenance-window/contact/case-description fields since those aren't
+    cluster-derivable; see docs/MCP-USAGE.md for the full field mapping.
 - `pull-secret.json` — Red Hat Customer Portal pull secret, required to
   `podman pull` the Tech Preview image (SETUP.md §3). Gitignored and must
   be `chmod 600` (same category as the kubeconfig — see Security notes

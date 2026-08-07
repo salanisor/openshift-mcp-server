@@ -26,7 +26,7 @@ string here), so treat the forms below as the pattern, and confirm the
 literal string via `/` before relying on it.
 
 This repo's `config.toml` enables `core`, `config`, `kubevirt`, and
-`openshift` (SETUP.md §4), which together provide five prompts:
+`openshift` (SETUP.md §4), which together provide six prompts:
 
 | Prompt | Source | Arguments | What it does |
 |---|---|---|---|
@@ -35,6 +35,7 @@ This repo's `config.toml` enables `core`, `config`, `kubevirt`, and
 | `vm-troubleshoot` | built-in, `kubevirt` toolset | `namespace` (required), `name` (required) | Step-by-step OpenShift Virtualization VM troubleshooting guide: VM/VMI status, volumes, virt-launcher pod + logs, related events. |
 | `windows-golden-image` | built-in, `kubevirt` toolset | `winImageDownloadURL` (required), `namespace`/`windowsVersion`/`pipelineVersion` (optional) | Builds a Windows golden image via a Tekton pipeline. **Not usable as configured here** — needs the `tekton` toolset too, which this repo doesn't enable. Listed for completeness; enabling it is a deliberate scope decision (check with the user first, per CLAUDE.md). |
 | `openshift-virtualization-troubleshooting` | custom, this repo's `config.toml` | `vm_name` (required), `namespace` (required) | Wraps VM troubleshooting with this cluster's specific gaps (no Node reads, no metrics API, ~1h event window) so a clean result isn't misread as "all clear". See CLAUDE.md for why it exists alongside the built-in `vm-troubleshoot`. |
+| `proactive_ticket` | custom, this repo's `config.toml` | none | Collects the "Cluster details" block (node/etcd/project/service/pod counts) for a proactive support case. MASTERS/INFRA/APP NODE counts are always reported as not obtainable — this identity can't read `Node` *or* `MachineConfigPool` objects (both confirmed `Forbidden`, 2026-08-06) — while ETCD NODES/PROJECTS/SERVICES/PODS are live counts. Does not fill in maintenance-window, contact, or case-description fields; those aren't cluster-derivable. |
 
 Example invocations (verify the exact slash-command string via `/` first):
 
@@ -43,6 +44,7 @@ Example invocations (verify the exact slash-command string via `/` first):
 /mcp__kubernetes-mcp-server__cluster-health-check namespace=cluster-ops check_events=false
 /mcp__kubernetes-mcp-server__vm-troubleshoot namespace=openshift-cnv name=my-vm
 /mcp__kubernetes-mcp-server__openshift-virtualization-troubleshooting vm_name=my-vm namespace=openshift-cnv
+/mcp__kubernetes-mcp-server__proactive_ticket
 ```
 
 You don't have to use the slash form — asking in natural language ("check
